@@ -79,7 +79,8 @@ def adjustCounts(
         cluster_toc = []
         cluster_metadata = []
 
-        for cluster_id in sorted(cluster_groups.keys()):
+        # Preserve the same cluster column order used later during expansion.
+        for cluster_id in cluster_groups:
             cell_indices = cluster_groups[cluster_id]
             # Aggregate counts for cluster
             cluster_counts = np.array(sc.toc[:, cell_indices].sum(axis=1)).flatten()
