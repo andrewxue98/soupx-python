@@ -69,6 +69,9 @@ def autoEstCont(sc, **kwargs):
         expressCut=0.9
     )
 
+    if mrks.empty:
+        raise ValueError("No plausible marker genes found. Reduce tfidfMin or soupQuantile")
+
     # R marker processing
     mrks = mrks.sort_values(['gene', 'tfidf'], ascending=[True, False])
     mrks = mrks[~mrks.duplicated(subset='gene', keep='first')]
@@ -405,37 +408,73 @@ def estimateNonExpressingCells(
 
     unique_clusters = np.unique(clusters)
 
+    if not nonExpressedGeneList:
+        raise ValueError("nonExpressedGeneList must contain at least one gene set.")
+
+    first_item = nonExpressedGeneList[0]
+    if isinstance(first_item, (str, int, np.integer)):
+        gene_sets = [list(nonExpressedGeneList)]
+    else:
+        gene_sets = [list(gene_set) for gene_set in nonExpressedGeneList]
+
+    invalid_sets = []
+    for set_idx, gene_set in enumerate(gene_sets, start=1):
+        if not gene_set:
+            invalid_sets.append(f"set {set_idx} is empty")
+            continue
+
+        missing_genes = [
+            gene for gene in gene_set
+            if gene not in sc.soupProfile.index
+        ]
+        if missing_genes:
+            invalid_sets.append(
+                f"set {set_idx} contains genes not found in data: {missing_genes}"
+            )
+
+    if invalid_sets:
+        raise ValueError(
+            "Invalid nonExpressedGeneList: " + "; ".join(invalid_sets)
+        )
+
     # R: tgtGns = unique(unlist(nonExpressedGeneList))
-    tgtGns = list(set(nonExpressedGeneList))  # For single gene list, this is just the list
+    tgtGns = list(dict.fromkeys(
+        gene for gene_set in gene_sets for gene in gene_set
+    ))
 
     # Get gene indices
     gene_indices = []
+    gene_index_map = {}
     for gene in tgtGns:
-        try:
-            if hasattr(sc.soupProfile, 'index'):
-                gene_idx = sc.soupProfile.index.get_loc(gene)
-                gene_indices.append(gene_idx)
-            else:
-                gene_indices.append(int(gene))
-        except (KeyError, ValueError):
-            if verbose:
-                print(f"Warning: Gene {gene} not found in data")
-            continue
-
-    if len(gene_indices) == 0:
-        return np.ones(sc.n_cells, dtype=bool)
+        if hasattr(sc.soupProfile, 'index'):
+            gene_idx = sc.soupProfile.index.get_loc(gene)
+        else:
+            gene_idx = int(gene)
+        gene_indices.append(gene_idx)
+        gene_index_map[gene] = len(gene_indices) - 1
 
     # R: dat = sc$toc[tgtGns,,drop=FALSE]
     dat = sc.toc[gene_indices, :]
 
     # R: cnts = do.call(rbind,lapply(nonExpressedGeneList,function(e) colSums(dat[e,,drop=FALSE])))
-    # For single gene lists, this is just the gene counts
-    cnts = dat  # For single gene case, cnts is just the gene counts
-
-    # R: exp = outer(sc$soupProfile[tgtGns,'est'],sc$metaData$nUMIs*maximumContamination)
     soup_est = sc.soupProfile.iloc[gene_indices]['est'].values
     cell_nUMIs = sc.metaData['nUMIs'].values
-    exp = np.outer(soup_est, cell_nUMIs * maximumContamination)
+
+    set_gene_rows = []
+    for gene_set in gene_sets:
+        rows = [gene_index_map[gene] for gene in gene_set if gene in gene_index_map]
+        set_gene_rows.append(rows)
+
+    cnts = np.vstack([
+        np.asarray(dat[rows, :].sum(axis=0)).ravel()
+        for rows in set_gene_rows
+    ])
+
+    # Expected soup counts are the summed soup profile for each gene set.
+    exp = np.outer(
+        np.array([soup_est[rows].sum() for rows in set_gene_rows]),
+        cell_nUMIs * maximumContamination
+    )
 
     # R: s = split(names(clusters),clusters)
     cluster_cell_dict = {}
@@ -459,15 +498,15 @@ def estimateNonExpressingCells(
                 clustExp[i, j] = 1 - stats.poisson.cdf(cnts_dense[i, j] - 1, exp[i, j])
 
     # R: clustExp = t(apply(clustExp,1,p.adjust,method='BH'))
-    # Apply FDR correction across cells for each gene
-    for gene_idx in range(clustExp.shape[0]):
-        _, clustExp[gene_idx, :], _, _ = multipletests(
-            clustExp[gene_idx, :], alpha=FDR, method='fdr_bh'
+    # Apply FDR correction across cells for each gene set
+    for set_idx in range(clustExp.shape[0]):
+        _, clustExp[set_idx, :], _, _ = multipletests(
+            clustExp[set_idx, :], alpha=FDR, method='fdr_bh'
         )
 
     # R: clustExp = do.call(rbind,lapply(s,function(e) apply(clustExp[,e,drop=FALSE],1,min)))
     # For each cluster, get minimum p-value across cells in that cluster for each gene
-    cluster_pvals = np.zeros((len(gene_indices), len(unique_clusters)))
+    cluster_pvals = np.zeros((len(set_gene_rows), len(unique_clusters)))
 
     for j, cluster in enumerate(unique_clusters):
         cell_indices_in_cluster = cluster_cell_dict[cluster]
@@ -483,14 +522,15 @@ def estimateNonExpressingCells(
 
     # R: clustExp = clustExp[match(clusters,rownames(clustExp)),,drop=FALSE]
     # Expand back to cell level - if cluster passes for a gene, all cells in cluster pass
-    use_cells = np.ones(sc.n_cells, dtype=bool)
+    use_cells = np.ones((sc.n_cells, len(set_gene_rows)), dtype=bool)
 
     for i, cluster in enumerate(clusters):
         cluster_idx = np.where(unique_clusters == cluster)[0]
         if len(cluster_idx) > 0:
             cluster_idx = cluster_idx[0]
-            # If ANY gene fails the test for this cluster, exclude all cells in cluster
-            if not np.all(cluster_passes[:, cluster_idx]):
-                use_cells[i] = False
+            use_cells[i, :] = cluster_passes[:, cluster_idx]
+
+    if len(set_gene_rows) == 1:
+        return use_cells[:, 0]
 
     return use_cells
