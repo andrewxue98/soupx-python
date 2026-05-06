@@ -1,0 +1,50 @@
+{
+  "name": "small",
+  "cells": 256,
+  "genes": 1500,
+  "empty_droplets": 1024,
+  "marker_sets": {
+    "0": [
+      "KIF9-AS1",
+      "INTS6",
+      "RFC3",
+      "TMEM161B-AS1",
+      "DENND4C"
+    ],
+    "1": [
+      "MT-CO2",
+      "MT-CYB",
+      "MT-ND1",
+      "MT-ND4",
+      "MT-CO1"
+    ],
+    "2": [
+      "PCDH9",
+      "TENM1",
+      "GPC6",
+      "FHIT",
+      "ERBB4"
+    ],
+    "3": [
+      "EEF1A1",
+      "HSP90AB1",
+      "HSP90B1",
+      "HNRNPK",
+      "HNRNPA1"
+    ],
+    "4": [
+      "MT-ND4L",
+      "MTRNR2L12",
+      "SOS2",
+      "ACTB",
+      "MT-ND5"
+    ],
+    "5": [
+      "MTRNR2L12",
+      "MT-ND4L",
+      "MT-ND2",
+      "MT-ND5",
+      "MT-CO3"
+    ]
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "name": "medium",
+  "cells": 512,
+  "genes": 2500,
+  "empty_droplets": 1536,
+  "marker_sets": {
+    "0": [
+      "FBXL20",
+      "DNAJC9",
+      "RPL37A",
+      "INTS6",
+      "KIF9-AS1"
+    ],
+    "1": [
+      "MT-CO2",
+      "MT-CYB",
+      "MT-ND4",
+      "MT-ATP6",
+      "PPIA"
+    ],
+    "2": [
+      "TENM4",
+      "GRID2",
+      "TENM1",
+      "GPC6",
+      "WWOX"
+    ],
+    "3": [
+      "HSPA8",
+      "EEF1A1",
+      "HNRNPA1",
+      "HNRNPK",
+      "ACTG1"
+    ],
+    "4": [
+      "MTRNR2L12",
+      "MT-ND4L",
+      "MT-ND2",
+      "MT-ND5",
+      "MT-ND1"
+    ],
+    "5": [
+      "MTRNR2L12",
+      "MT-ND4L",
+      "MT-ND5",
+      "MT-ND2",
+      "HSPA8"
+    ]
+  }
+}

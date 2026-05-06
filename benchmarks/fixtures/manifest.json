@@ -1,0 +1,24 @@
+{
+  "source_raw_h5": "/home/tinglab/lab/Andrew/soupx/data/raw_feature_bc_matrix.h5",
+  "source_filtered_h5": "/home/tinglab/lab/Andrew/soupx/data/filtered_feature_bc_matrix.h5",
+  "fixtures": {
+    "very_small": {
+      "cells": 64,
+      "genes": 512,
+      "empty_droplets": 256,
+      "raw_columns": 256
+    },
+    "small": {
+      "cells": 256,
+      "genes": 1500,
+      "empty_droplets": 1024,
+      "raw_columns": 1024
+    },
+    "medium": {
+      "cells": 512,
+      "genes": 2500,
+      "empty_droplets": 1536,
+      "raw_columns": 1536
+    }
+  }
+}

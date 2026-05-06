@@ -35,10 +35,6 @@ def autoEstCont(sc, **kwargs):
 
     clusters = sc.metaData['clusters'].values
     unique_clusters = np.unique(clusters)
-    cluster_cell_indices = {
-        cluster_id: np.flatnonzero(clusters == cluster_id)
-        for cluster_id in unique_clusters
-    }
 
     # STEP 1: Collapse by cluster - EXACT R MATCH
     # R: s = split(rownames(sc$metaData),sc$metaData$clusters)
@@ -47,7 +43,9 @@ def autoEstCont(sc, **kwargs):
     cluster_metadata = []
 
     for cluster_id in unique_clusters:
-        cell_indices = cluster_cell_indices[cluster_id]
+        cluster_mask = clusters == cluster_id
+        cell_indices = np.where(cluster_mask)[0]
+
         # R: rowSums(sc$toc[,e,drop=FALSE])
         cluster_counts = np.array(sc.toc[:, cell_indices].sum(axis=1)).flatten()
         cluster_toc.append(cluster_counts)
@@ -107,19 +105,21 @@ def autoEstCont(sc, **kwargs):
     # STEP 4: Get estimates in clusters - CORRECTED R METHOD
     # R: tmp = as.list(tgts); names(tmp) = tgts
     # R creates a list where each gene is its own "gene set"
+    gene_sets_dict = {gene: [gene] for gene in final_genes}
+
     # R: ute = estimateNonExpressingCells(sc,tmp,maximumContamination=max(contaminationRange),FDR=rhoMaxFDR)
-    # Call estimateNonExpressingCells ONCE per marker gene to preserve the
-    # original single-gene control flow.
+    # Call estimateNonExpressingCells ONCE with all genes as individual gene sets
     ute_cell_level = np.zeros((sc.n_cells, len(final_genes)), dtype=bool)
+
+    # This is the critical fix - call estimateNonExpressingCells for each gene as R does
     for i, gene in enumerate(final_genes):
-        ute_cell_level[:, i] = estimateNonExpressingCells(
-            sc,
-            [gene],
-            clusters,
+        non_expressing = estimateNonExpressingCells(
+            sc, [gene], clusters,  # Single gene as list (like R's individual gene sets)
             maximumContamination=max(contaminationRange),
             FDR=rhoMaxFDR,
-            verbose=False,
+            verbose=False
         )
+        ute_cell_level[:, i] = non_expressing
 
     # R: m = rownames(sc$metaData)[match(rownames(ssc$metaData),sc$metaData$clusters)]
     # R: ute = t(ute[m,,drop=FALSE])
@@ -127,8 +127,10 @@ def autoEstCont(sc, **kwargs):
     ute = np.zeros((len(final_genes), len(unique_clusters)), dtype=bool)
 
     for i, cluster_id in enumerate(unique_clusters):
-        cell_indices = cluster_cell_indices[cluster_id]
-        ute[:, i] = np.any(ute_cell_level[cell_indices, :], axis=0)
+        cluster_mask = clusters == cluster_id
+        # For each gene, check if ANY cell in this cluster can be used for estimation
+        for j in range(len(final_genes)):
+            ute[j, i] = np.any(ute_cell_level[cluster_mask, j])
 
     if verbose:
         n_usable_combinations = np.sum(ute)
@@ -194,16 +196,19 @@ def autoEstCont(sc, **kwargs):
     #     })
     valid_estimates = dd[dd['useEst']]
 
-    if valid_estimates.empty:
-        posterior_density = np.zeros_like(rhoProbes)
-    else:
-        shape = k + valid_estimates['obsCnt'].to_numpy()
-        scale = theta / (1 + theta * valid_estimates['expCnt'].to_numpy())
-        posterior_density = stats.gamma.pdf(
-            rhoProbes[:, np.newaxis],
-            a=shape[np.newaxis, :],
-            scale=scale[np.newaxis, :],
-        ).mean(axis=1)
+    posterior_density = []
+    for rho in rhoProbes:
+        densities = []
+        for _, row in valid_estimates.iterrows():
+            # R: dgamma(e,k+tmp$obsCnt,scale=theta/(1+theta*tmp$expCnt))
+            shape = k + row['obsCnt']
+            scale = theta / (1 + theta * row['expCnt'])
+            density = stats.gamma.pdf(rho, a=shape, scale=scale)
+            densities.append(density)
+
+        posterior_density.append(np.mean(densities) if densities else 0)
+
+    posterior_density = np.array(posterior_density)
 
     # R: w = which(rhoProbes>=contaminationRange[1] & rhoProbes<=contaminationRange[2])
     # R: rhoEst = (rhoProbes[w])[which.max(tmp[w])]
@@ -276,14 +281,25 @@ def quickMarkers(
     cell_indices = toc_coo.col[w]  # R: toc@j[w]+1
     cell_clusters = clusters[cell_indices]  # clusters for those cells
 
+    # Create the split structure - for each cluster, count gene occurrences
+    nObs = {}
+    for cluster in unique_clusters:
+        cluster_mask = cell_clusters == cluster
+        if np.any(cluster_mask):
+            genes_in_cluster = gene_indices[cluster_mask]
+            # Count occurrences of each gene in this cluster
+            unique_genes, gene_counts = np.unique(genes_in_cluster, return_counts=True)
+            nObs[cluster] = dict(zip(unique_genes, gene_counts))
+        else:
+            nObs[cluster] = {}
+
+    # Convert to matrix form - genes x clusters
     n_genes = toc.shape[0]
-    n_clusters = len(unique_clusters)
-    cluster_codes = np.searchsorted(unique_clusters, cell_clusters)
-    flat_idx = gene_indices * n_clusters + cluster_codes
-    nObs_matrix = np.bincount(
-        flat_idx,
-        minlength=n_genes * n_clusters,
-    ).reshape(n_genes, n_clusters)
+    nObs_matrix = np.zeros((n_genes, len(unique_clusters)))
+
+    for j, cluster in enumerate(unique_clusters):
+        for gene_idx, count in nObs[cluster].items():
+            nObs_matrix[gene_idx, j] = count
 
     # R: nTot = rowSums(nObs)
     nTot = nObs_matrix.sum(axis=1)
@@ -299,33 +315,44 @@ def quickMarkers(
     # R: score = tf*idf
     score = tf * idf[:, np.newaxis]  # Broadcasting idf across clusters
 
-    gene_idx_nonzero, cluster_idx_nonzero = np.nonzero(nObs_matrix)
-    if len(gene_idx_nonzero) == 0:
+    # Calculate hypergeometric p-values for each gene/cluster combination
+    markers = []
+
+    for j, cluster in enumerate(unique_clusters):
+        n_cells_cluster = clCnts[cluster]
+
+        for gene_idx in range(n_genes):
+            if nObs_matrix[gene_idx, j] == 0:
+                continue  # Skip genes not expressed in this cluster
+
+            # Hypergeometric test parameters
+            M = n_cells_total  # Total population
+            n = int(nTot[gene_idx])  # Success states in population
+            N_sample = n_cells_cluster  # Sample size
+            k = int(nObs_matrix[gene_idx, j])  # Observed successes
+
+            if n == 0 or k == 0:
+                p_val = 1.0
+            else:
+                # R: phyper(k-1, n, M-n, N_sample, lower.tail=FALSE)
+                p_val = stats.hypergeom.sf(k - 1, M, n, N_sample)
+
+            markers.append({
+                'gene': gene_names[gene_idx],
+                'cluster': str(cluster),
+                'tfidf': score[gene_idx, j],
+                'geneFrequency': tf[gene_idx, j],
+                'geneFrequencyGlobal': nTot[gene_idx] / n_cells_total,
+                'p_value': p_val,
+                'gene_idx': gene_idx,
+                'cluster_idx': j
+            })
+
+    if len(markers) == 0:
         return pd.DataFrame()
 
-    M = n_cells_total
-    n = nTot[gene_idx_nonzero].astype(int)
-    N_sample = cluster_sizes[cluster_idx_nonzero].astype(int)
-    k = nObs_matrix[gene_idx_nonzero, cluster_idx_nonzero].astype(int)
-    p_vals = np.ones(len(k), dtype=float)
-    valid_mask = (n > 0) & (k > 0)
-    p_vals[valid_mask] = stats.hypergeom.sf(
-        k[valid_mask] - 1,
-        M,
-        n[valid_mask],
-        N_sample[valid_mask],
-    )
-
-    df = pd.DataFrame({
-        'gene': [gene_names[idx] for idx in gene_idx_nonzero],
-        'cluster': unique_clusters[cluster_idx_nonzero].astype(str),
-        'tfidf': score[gene_idx_nonzero, cluster_idx_nonzero],
-        'geneFrequency': tf[gene_idx_nonzero, cluster_idx_nonzero],
-        'geneFrequencyGlobal': nTot[gene_idx_nonzero] / n_cells_total,
-        'p_value': p_vals,
-        'gene_idx': gene_idx_nonzero,
-        'cluster_idx': cluster_idx_nonzero,
-    })
+    # Convert to DataFrame and apply FDR correction per cluster
+    df = pd.DataFrame(markers)
 
     # Apply FDR correction within each cluster
     for cluster in unique_clusters:
@@ -450,10 +477,11 @@ def estimateNonExpressingCells(
     )
 
     # R: s = split(names(clusters),clusters)
-    cluster_cell_dict = {
-        cluster: np.flatnonzero(clusters == cluster)
-        for cluster in unique_clusters
-    }
+    cluster_cell_dict = {}
+    for i, cluster in enumerate(clusters):
+        if cluster not in cluster_cell_dict:
+            cluster_cell_dict[cluster] = []
+        cluster_cell_dict[cluster].append(i)
 
     # R: clustExp = ppois(cnts-1,exp,lower.tail=FALSE)
     # Convert sparse to dense for easier manipulation
@@ -496,10 +524,11 @@ def estimateNonExpressingCells(
     # Expand back to cell level - if cluster passes for a gene, all cells in cluster pass
     use_cells = np.ones((sc.n_cells, len(set_gene_rows)), dtype=bool)
 
-    for cluster_idx, cluster in enumerate(unique_clusters):
-        cell_indices = cluster_cell_dict[cluster]
-        if len(cell_indices) > 0:
-            use_cells[cell_indices, :] = cluster_passes[:, cluster_idx]
+    for i, cluster in enumerate(clusters):
+        cluster_idx = np.where(unique_clusters == cluster)[0]
+        if len(cluster_idx) > 0:
+            cluster_idx = cluster_idx[0]
+            use_cells[i, :] = cluster_passes[:, cluster_idx]
 
     if len(set_gene_rows) == 1:
         return use_cells[:, 0]

@@ -107,19 +107,17 @@ def autoEstCont(sc, **kwargs):
     # STEP 4: Get estimates in clusters - CORRECTED R METHOD
     # R: tmp = as.list(tgts); names(tmp) = tgts
     # R creates a list where each gene is its own "gene set"
+    gene_sets = [[gene] for gene in final_genes]
+
     # R: ute = estimateNonExpressingCells(sc,tmp,maximumContamination=max(contaminationRange),FDR=rhoMaxFDR)
-    # Call estimateNonExpressingCells ONCE per marker gene to preserve the
-    # original single-gene control flow.
-    ute_cell_level = np.zeros((sc.n_cells, len(final_genes)), dtype=bool)
-    for i, gene in enumerate(final_genes):
-        ute_cell_level[:, i] = estimateNonExpressingCells(
-            sc,
-            [gene],
-            clusters,
-            maximumContamination=max(contaminationRange),
-            FDR=rhoMaxFDR,
-            verbose=False,
-        )
+    ute_cell_level = estimateNonExpressingCells(
+        sc,
+        gene_sets,
+        clusters,
+        maximumContamination=max(contaminationRange),
+        FDR=rhoMaxFDR,
+        verbose=False,
+    )
 
     # R: m = rownames(sc$metaData)[match(rownames(ssc$metaData),sc$metaData$clusters)]
     # R: ute = t(ute[m,,drop=FALSE])

@@ -1,0 +1,35 @@
+diff --git a/benchmarks/estimation_after_patch2.py b/benchmarks/estimation_after_patch3.py
+index 1e7345a..eea9d4a 100644
+--- a/benchmarks/estimation_after_patch2.py
++++ b/benchmarks/estimation_after_patch3.py
+@@ -105,21 +105,17 @@ def autoEstCont(sc, **kwargs):
+     # STEP 4: Get estimates in clusters - CORRECTED R METHOD
+     # R: tmp = as.list(tgts); names(tmp) = tgts
+     # R creates a list where each gene is its own "gene set"
+-    gene_sets_dict = {gene: [gene] for gene in final_genes}
++    gene_sets = [[gene] for gene in final_genes]
+ 
+     # R: ute = estimateNonExpressingCells(sc,tmp,maximumContamination=max(contaminationRange),FDR=rhoMaxFDR)
+-    # Call estimateNonExpressingCells ONCE with all genes as individual gene sets
+-    ute_cell_level = np.zeros((sc.n_cells, len(final_genes)), dtype=bool)
+-
+-    # This is the critical fix - call estimateNonExpressingCells for each gene as R does
+-    for i, gene in enumerate(final_genes):
+-        non_expressing = estimateNonExpressingCells(
+-            sc, [gene], clusters,  # Single gene as list (like R's individual gene sets)
+-            maximumContamination=max(contaminationRange),
+-            FDR=rhoMaxFDR,
+-            verbose=False
+-        )
+-        ute_cell_level[:, i] = non_expressing
++    ute_cell_level = estimateNonExpressingCells(
++        sc,
++        gene_sets,
++        clusters,
++        maximumContamination=max(contaminationRange),
++        FDR=rhoMaxFDR,
++        verbose=False,
++    )
+ 
+     # R: m = rownames(sc$metaData)[match(rownames(ssc$metaData),sc$metaData$clusters)]
+     # R: ute = t(ute[m,,drop=FALSE])

@@ -1,0 +1,134 @@
+{
+  "very_small": {
+    "fixture": "very_small",
+    "quickMarkers": {
+      "seconds": 0.008544901153072715,
+      "rows": 396,
+      "digest": "e3091f4d2805c39fe689ba9927250af102fdc000",
+      "tfidf_sum": 243.05533340460008
+    },
+    "estimateNonExpressingCells": {
+      "seconds": 0.009368601022288203,
+      "shape": [
+        64,
+        6
+      ],
+      "true_count": 10,
+      "digest": "6094c7b0f5394c5e809fe42318f5212f8e074e9a"
+    },
+    "autoEstCont": {
+      "seconds": 0.013096101814880967,
+      "rho": 0.044,
+      "n_estimates": 11,
+      "digest": "e49c286d94a85661b62c1c35245f34f6034157fb"
+    },
+    "adjustCounts": {
+      "subtraction": {
+        "seconds": 0.08077840902842581,
+        "sum": 244101.2464285714,
+        "nnz": 19377,
+        "digest": "e53f21798b49d7b13d33f14b695968c759d9438e"
+      },
+      "multinomial": {
+        "seconds": 0.09039230993948877,
+        "sum": 243851.14920634922,
+        "nnz": 19360,
+        "digest": "a2a1467b2cfae68044e608d7ecf2aba8ecda4eb4"
+      },
+      "soupOnly": {
+        "seconds": 0.08037530910223722,
+        "sum": 255438.0,
+        "nnz": 19328,
+        "digest": "9f618f1e49fdcac42b5842933ca7d7b2f2e28978"
+      }
+    }
+  },
+  "small": {
+    "fixture": "small",
+    "quickMarkers": {
+      "seconds": 0.03615540498867631,
+      "rows": 4222,
+      "digest": "d00cd07eb093ad13280bae5c7881be426c0c7889",
+      "tfidf_sum": 2350.924865834857
+    },
+    "estimateNonExpressingCells": {
+      "seconds": 0.033260003896430135,
+      "shape": [
+        256,
+        6
+      ],
+      "true_count": 42,
+      "digest": "1c22f426007de6be866ac50ab9eeba70d01098ee"
+    },
+    "autoEstCont": {
+      "seconds": 0.2066602250561118,
+      "rho": 0.229,
+      "n_estimates": 164,
+      "digest": "dbfa432d430cf7a49e0bc888250c26956aea4855"
+    },
+    "adjustCounts": {
+      "subtraction": {
+        "seconds": 0.7756923919077963,
+        "sum": 1900256.3896832191,
+        "nnz": 205781,
+        "digest": "a106da9dd2588d0a7161e63066481550d6a0ffd9"
+      },
+      "multinomial": {
+        "seconds": 0.7266325859818608,
+        "sum": 1900018.3896832191,
+        "nnz": 205774,
+        "digest": "3e485f9cf2fcfe3eb44733bc1aa5798a82c6eff1"
+      },
+      "soupOnly": {
+        "seconds": 0.42566635087132454,
+        "sum": 1996511.0,
+        "nnz": 206110,
+        "digest": "2ff756f8bd52f08ea96d96c492bdbfab4c5b1b62"
+      }
+    }
+  },
+  "medium": {
+    "fixture": "medium",
+    "quickMarkers": {
+      "seconds": 0.0942166110035032,
+      "rows": 7282,
+      "digest": "d7d912089a3313148e9259335b3351bdba92fa80",
+      "tfidf_sum": 4177.157930138761
+    },
+    "estimateNonExpressingCells": {
+      "seconds": 0.07918920903466642,
+      "shape": [
+        512,
+        6
+      ],
+      "true_count": 85,
+      "digest": "a9834cd0c24b0598f18ff0f9f01e5bd24a803cf6"
+    },
+    "autoEstCont": {
+      "seconds": 0.4032660478260368,
+      "rho": 0.146,
+      "n_estimates": 164,
+      "digest": "c8057445b0a44fd85090ef3a2d26baeae90d5690"
+    },
+    "adjustCounts": {
+      "subtraction": {
+        "seconds": 1.8633781208191067,
+        "sum": 5039541.523958771,
+        "nnz": 653390,
+        "digest": "aed4b9a0c41674013d26a2496000360af260599b"
+      },
+      "multinomial": {
+        "seconds": 1.8945696249138564,
+        "sum": 5039302.5239587715,
+        "nnz": 653373,
+        "digest": "afbf0c5b23f58fe8bb3fbf91986fc66adee22519"
+      },
+      "soupOnly": {
+        "seconds": 1.2149242719169706,
+        "sum": 5298874.0,
+        "nnz": 655725,
+        "digest": "976f8d745bd54c5eb29c46c4ea2760b44d0f55ae"
+      }
+    }
+  }
+}

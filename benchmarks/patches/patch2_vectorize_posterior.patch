@@ -1,0 +1,34 @@
+diff --git a/benchmarks/snapshots/estimation_head.py b/benchmarks/estimation_after_patch2.py
+index b13a835..1e7345a 100644
+--- a/benchmarks/snapshots/estimation_head.py
++++ b/benchmarks/estimation_after_patch2.py
+@@ -196,19 +196,16 @@ def autoEstCont(sc, **kwargs):
+     #     })
+     valid_estimates = dd[dd['useEst']]
+ 
+-    posterior_density = []
+-    for rho in rhoProbes:
+-        densities = []
+-        for _, row in valid_estimates.iterrows():
+-            # R: dgamma(e,k+tmp$obsCnt,scale=theta/(1+theta*tmp$expCnt))
+-            shape = k + row['obsCnt']
+-            scale = theta / (1 + theta * row['expCnt'])
+-            density = stats.gamma.pdf(rho, a=shape, scale=scale)
+-            densities.append(density)
+-
+-        posterior_density.append(np.mean(densities) if densities else 0)
+-
+-    posterior_density = np.array(posterior_density)
++    if valid_estimates.empty:
++        posterior_density = np.zeros_like(rhoProbes)
++    else:
++        shape = k + valid_estimates['obsCnt'].to_numpy()
++        scale = theta / (1 + theta * valid_estimates['expCnt'].to_numpy())
++        posterior_density = stats.gamma.pdf(
++            rhoProbes[:, np.newaxis],
++            a=shape[np.newaxis, :],
++            scale=scale[np.newaxis, :],
++        ).mean(axis=1)
+ 
+     # R: w = which(rhoProbes>=contaminationRange[1] & rhoProbes<=contaminationRange[2])
+     # R: rhoEst = (rhoProbes[w])[which.max(tmp[w])]

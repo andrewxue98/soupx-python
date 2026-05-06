@@ -1,0 +1,167 @@
+diff --git a/benchmarks/snapshots/correction_head.py b/benchmarks/correction_after_patch6.py
+index fe95b2b..cbb42bb 100644
+--- a/benchmarks/snapshots/correction_head.py
++++ b/benchmarks/correction_after_patch6.py
+@@ -295,26 +295,23 @@ def _subtraction_method(
+         print("Using subtraction method")
+ 
+     # Calculate expected soup counts
+-    soup_expression = sc.soupProfile['est'].values
+-    corrected = sc.toc.copy().astype(float)
+-
+-    for cell_idx in range(sc.n_cells):
+-        cell_rho = sc.metaData.iloc[cell_idx]['rho']
+-        cell_nUMIs = sc.metaData.iloc[cell_idx]['nUMIs']
+-
+-        # Expected soup counts for this cell
+-        expected_soup = soup_expression * cell_nUMIs * cell_rho
+-
+-        # Get observed counts
+-        observed = sc.toc[:, cell_idx].toarray().flatten()
+-
+-        # Simple subtraction
+-        corrected_counts = observed - expected_soup
+-
+-        # Can't have negative counts
+-        corrected_counts = np.maximum(corrected_counts, 0)
++    soup_expression = sc.soupProfile['est'].values[:, np.newaxis]
++    cell_rhos = sc.metaData['rho'].to_numpy(dtype=float)
++    cell_nUMIs = sc.metaData['nUMIs'].to_numpy(dtype=float)
++    chunk_size = min(256, sc.n_cells)
++    corrected_blocks = []
++
++    for batch_start in range(0, sc.n_cells, chunk_size):
++        batch_end = min(batch_start + chunk_size, sc.n_cells)
++        observed = sc.toc[:, batch_start:batch_end].toarray().astype(float, copy=False)
++        expected_soup = soup_expression * (
++            cell_nUMIs[batch_start:batch_end] * cell_rhos[batch_start:batch_end]
++        )[np.newaxis, :]
++        corrected_blocks.append(
++            sparse.csr_matrix(np.maximum(observed - expected_soup, 0))
++        )
+ 
+-        corrected[:, cell_idx] = corrected_counts.reshape(-1, 1)
++    corrected = sparse.hstack(corrected_blocks, format='csr')
+ 
+     if roundToInt:
+         corrected = _stochastic_round(corrected)
+@@ -339,8 +336,15 @@ def _multinomial_method(
+     if verbose >= 2:
+         print("Initializing with subtraction method")
+ 
+-    corrected = _subtraction_method(sc, False, 0, tol)
+-    fit_init = sc.toc - corrected
++    soup_expression = sc.soupProfile['est'].values
++    fit_init = sc.toc.copy().astype(float)
++    for cell_idx in range(sc.n_cells):
++        cell_rho = sc.metaData.iloc[cell_idx]['rho']
++        cell_nUMIs = sc.metaData.iloc[cell_idx]['nUMIs']
++        expected_soup = soup_expression * cell_nUMIs * cell_rho
++        observed = sc.toc[:, cell_idx].toarray().flatten()
++        corrected_counts = np.maximum(observed - expected_soup, 0)
++        fit_init[:, cell_idx] = (observed - corrected_counts).reshape(-1, 1)
+ 
+     ps = sc.soupProfile['est'].values
+     out = sparse.lil_matrix(sc.toc.shape)
+@@ -355,16 +359,19 @@ def _multinomial_method(
+             print(f"Processing cells {batch_start + 1}-{batch_end}/{sc.n_cells}")
+ 
+         # Process this batch
++        lims_block = sc.toc[:, batch_start:batch_end].toarray()
++        fit_block = fit_init[:, batch_start:batch_end].toarray().astype(float, copy=False)
+         for cell_idx in range(batch_start, batch_end):
++            local_idx = cell_idx - batch_start
+             # Target soup molecules for this cell
+             nSoupUMIs = round(sc.metaData.iloc[cell_idx]['nUMIs'] *
+                               sc.metaData.iloc[cell_idx]['rho'])
+ 
+             # Observational limits
+-            lims = sc.toc[:, cell_idx].toarray().flatten()
++            lims = lims_block[:, local_idx]
+ 
+             # Initial soup counts (vectorized initialization)
+-            fit = fit_init[:, cell_idx].toarray().flatten().astype(float)
++            fit = fit_block[:, local_idx].copy()
+ 
+             # Fast vectorized optimization
+             fit = _optimize_multinomial_cell_fast(fit, ps, lims, nSoupUMIs, verbose >= 3)
+@@ -492,40 +499,50 @@ def _soupOnly_method(
+         print("Identifying genes likely to be pure contamination")
+ 
+     corrected = sc.toc.copy().astype(float)
++    soup_expression = sc.soupProfile['est'].values[:, np.newaxis]
++    cell_rhos = sc.metaData['rho'].to_numpy(dtype=float)
++    cell_nUMIs = sc.metaData['nUMIs'].to_numpy(dtype=float)
++    chunk_size = min(128, sc.n_cells)
++
++    for batch_start in range(0, sc.n_cells, chunk_size):
++        batch_end = min(batch_start + chunk_size, sc.n_cells)
++        observed_block = sc.toc[:, batch_start:batch_end].toarray()
++        expected_block = soup_expression * (
++            cell_nUMIs[batch_start:batch_end] * cell_rhos[batch_start:batch_end]
++        )[np.newaxis, :]
+ 
+-    for cell_idx in range(sc.n_cells):
+-        cell_rho = sc.metaData.iloc[cell_idx]['rho']
+-        cell_nUMIs = sc.metaData.iloc[cell_idx]['nUMIs']
+-        observed = sc.toc[:, cell_idx].toarray().flatten()
+-
+-        # Expected soup counts
+-        expected_soup = sc.soupProfile['est'].values * cell_nUMIs * cell_rho
+-
+-        # Calculate p-values for each gene
+-        p_vals = []
+-        for gene_idx in range(sc.n_genes):
+-            if expected_soup[gene_idx] <= 0:
+-                p_val = 0.0 if observed[gene_idx] > 0 else 1.0
+-            else:
+-                # Poisson test - is observed significantly > expected?
+-                p_val = 1 - stats.poisson.cdf(observed[gene_idx] - 1, expected_soup[gene_idx])
+-            p_vals.append(p_val)
++        for cell_idx in range(batch_start, batch_end):
++            local_idx = cell_idx - batch_start
++            observed = observed_block[:, local_idx]
++            expected_soup = expected_block[:, local_idx]
++            cell_nUMIs_cell = cell_nUMIs[cell_idx]
++            cell_rho = cell_rhos[cell_idx]
++
++            # Calculate p-values for each gene
++            p_vals = []
++            for gene_idx in range(sc.n_genes):
++                if expected_soup[gene_idx] <= 0:
++                    p_val = 0.0 if observed[gene_idx] > 0 else 1.0
++                else:
++                    # Poisson test - is observed significantly > expected?
++                    p_val = 1 - stats.poisson.cdf(observed[gene_idx] - 1, expected_soup[gene_idx])
++                p_vals.append(p_val)
+ 
+-        # Sort genes by p-value
+-        gene_order = np.argsort(p_vals)
++            # Sort genes by p-value
++            gene_order = np.argsort(p_vals)
+ 
+-        # Remove genes until we've removed ~rho fraction
+-        soup_removed = 0
+-        target_soup = cell_nUMIs * cell_rho
++            # Remove genes until we've removed ~rho fraction
++            soup_removed = 0
++            target_soup = cell_nUMIs_cell * cell_rho
+ 
+-        for gene_idx in gene_order:
+-            if p_vals[gene_idx] > pCut:
+-                # This gene shows no evidence of endogenous expression
+-                soup_removed += observed[gene_idx]
+-                corrected[gene_idx, cell_idx] = 0
++            for gene_idx in gene_order:
++                if p_vals[gene_idx] > pCut:
++                    # This gene shows no evidence of endogenous expression
++                    soup_removed += observed[gene_idx]
++                    corrected[gene_idx, cell_idx] = 0
+ 
+-                if soup_removed >= target_soup:
+-                    break
++                    if soup_removed >= target_soup:
++                        break
+ 
+     if roundToInt:
+         corrected = _stochastic_round(corrected)

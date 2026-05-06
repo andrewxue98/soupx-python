@@ -1,0 +1,107 @@
+diff --git a/benchmarks/estimation_after_patch4.py b/benchmarks/estimation_after_patch5.py
+index e77c4b1..8046667 100644
+--- a/benchmarks/estimation_after_patch4.py
++++ b/benchmarks/estimation_after_patch5.py
+@@ -274,25 +274,14 @@ def quickMarkers(
+     cell_indices = toc_coo.col[w]  # R: toc@j[w]+1
+     cell_clusters = clusters[cell_indices]  # clusters for those cells
+ 
+-    # Create the split structure - for each cluster, count gene occurrences
+-    nObs = {}
+-    for cluster in unique_clusters:
+-        cluster_mask = cell_clusters == cluster
+-        if np.any(cluster_mask):
+-            genes_in_cluster = gene_indices[cluster_mask]
+-            # Count occurrences of each gene in this cluster
+-            unique_genes, gene_counts = np.unique(genes_in_cluster, return_counts=True)
+-            nObs[cluster] = dict(zip(unique_genes, gene_counts))
+-        else:
+-            nObs[cluster] = {}
+-
+-    # Convert to matrix form - genes x clusters
+     n_genes = toc.shape[0]
+-    nObs_matrix = np.zeros((n_genes, len(unique_clusters)))
+-
+-    for j, cluster in enumerate(unique_clusters):
+-        for gene_idx, count in nObs[cluster].items():
+-            nObs_matrix[gene_idx, j] = count
++    n_clusters = len(unique_clusters)
++    cluster_codes = np.searchsorted(unique_clusters, cell_clusters)
++    flat_idx = gene_indices * n_clusters + cluster_codes
++    nObs_matrix = np.bincount(
++        flat_idx,
++        minlength=n_genes * n_clusters,
++    ).reshape(n_genes, n_clusters)
+ 
+     # R: nTot = rowSums(nObs)
+     nTot = nObs_matrix.sum(axis=1)
+@@ -308,44 +297,33 @@ def quickMarkers(
+     # R: score = tf*idf
+     score = tf * idf[:, np.newaxis]  # Broadcasting idf across clusters
+ 
+-    # Calculate hypergeometric p-values for each gene/cluster combination
+-    markers = []
+-
+-    for j, cluster in enumerate(unique_clusters):
+-        n_cells_cluster = clCnts[cluster]
+-
+-        for gene_idx in range(n_genes):
+-            if nObs_matrix[gene_idx, j] == 0:
+-                continue  # Skip genes not expressed in this cluster
+-
+-            # Hypergeometric test parameters
+-            M = n_cells_total  # Total population
+-            n = int(nTot[gene_idx])  # Success states in population
+-            N_sample = n_cells_cluster  # Sample size
+-            k = int(nObs_matrix[gene_idx, j])  # Observed successes
+-
+-            if n == 0 or k == 0:
+-                p_val = 1.0
+-            else:
+-                # R: phyper(k-1, n, M-n, N_sample, lower.tail=FALSE)
+-                p_val = stats.hypergeom.sf(k - 1, M, n, N_sample)
+-
+-            markers.append({
+-                'gene': gene_names[gene_idx],
+-                'cluster': str(cluster),
+-                'tfidf': score[gene_idx, j],
+-                'geneFrequency': tf[gene_idx, j],
+-                'geneFrequencyGlobal': nTot[gene_idx] / n_cells_total,
+-                'p_value': p_val,
+-                'gene_idx': gene_idx,
+-                'cluster_idx': j
+-            })
+-
+-    if len(markers) == 0:
++    gene_idx_nonzero, cluster_idx_nonzero = np.nonzero(nObs_matrix)
++    if len(gene_idx_nonzero) == 0:
+         return pd.DataFrame()
+ 
+-    # Convert to DataFrame and apply FDR correction per cluster
+-    df = pd.DataFrame(markers)
++    M = n_cells_total
++    n = nTot[gene_idx_nonzero].astype(int)
++    N_sample = cluster_sizes[cluster_idx_nonzero].astype(int)
++    k = nObs_matrix[gene_idx_nonzero, cluster_idx_nonzero].astype(int)
++    p_vals = np.ones(len(k), dtype=float)
++    valid_mask = (n > 0) & (k > 0)
++    p_vals[valid_mask] = stats.hypergeom.sf(
++        k[valid_mask] - 1,
++        M,
++        n[valid_mask],
++        N_sample[valid_mask],
++    )
++
++    df = pd.DataFrame({
++        'gene': [gene_names[idx] for idx in gene_idx_nonzero],
++        'cluster': unique_clusters[cluster_idx_nonzero].astype(str),
++        'tfidf': score[gene_idx_nonzero, cluster_idx_nonzero],
++        'geneFrequency': tf[gene_idx_nonzero, cluster_idx_nonzero],
++        'geneFrequencyGlobal': nTot[gene_idx_nonzero] / n_cells_total,
++        'p_value': p_vals,
++        'gene_idx': gene_idx_nonzero,
++        'cluster_idx': cluster_idx_nonzero,
++    })
+ 
+     # Apply FDR correction within each cluster
+     for cluster in unique_clusters:

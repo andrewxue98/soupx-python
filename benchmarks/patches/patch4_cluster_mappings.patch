@@ -1,0 +1,71 @@
+diff --git a/benchmarks/estimation_after_patch3.py b/benchmarks/estimation_after_patch4.py
+index eea9d4a..e77c4b1 100644
+--- a/benchmarks/estimation_after_patch3.py
++++ b/benchmarks/estimation_after_patch4.py
+@@ -35,6 +35,10 @@ def autoEstCont(sc, **kwargs):
+ 
+     clusters = sc.metaData['clusters'].values
+     unique_clusters = np.unique(clusters)
++    cluster_cell_indices = {
++        cluster_id: np.flatnonzero(clusters == cluster_id)
++        for cluster_id in unique_clusters
++    }
+ 
+     # STEP 1: Collapse by cluster - EXACT R MATCH
+     # R: s = split(rownames(sc$metaData),sc$metaData$clusters)
+@@ -43,9 +47,7 @@ def autoEstCont(sc, **kwargs):
+     cluster_metadata = []
+ 
+     for cluster_id in unique_clusters:
+-        cluster_mask = clusters == cluster_id
+-        cell_indices = np.where(cluster_mask)[0]
+-
++        cell_indices = cluster_cell_indices[cluster_id]
+         # R: rowSums(sc$toc[,e,drop=FALSE])
+         cluster_counts = np.array(sc.toc[:, cell_indices].sum(axis=1)).flatten()
+         cluster_toc.append(cluster_counts)
+@@ -123,10 +125,8 @@ def autoEstCont(sc, **kwargs):
+     ute = np.zeros((len(final_genes), len(unique_clusters)), dtype=bool)
+ 
+     for i, cluster_id in enumerate(unique_clusters):
+-        cluster_mask = clusters == cluster_id
+-        # For each gene, check if ANY cell in this cluster can be used for estimation
+-        for j in range(len(final_genes)):
+-            ute[j, i] = np.any(ute_cell_level[cluster_mask, j])
++        cell_indices = cluster_cell_indices[cluster_id]
++        ute[:, i] = np.any(ute_cell_level[cell_indices, :], axis=0)
+ 
+     if verbose:
+         n_usable_combinations = np.sum(ute)
+@@ -470,11 +470,10 @@ def estimateNonExpressingCells(
+     )
+ 
+     # R: s = split(names(clusters),clusters)
+-    cluster_cell_dict = {}
+-    for i, cluster in enumerate(clusters):
+-        if cluster not in cluster_cell_dict:
+-            cluster_cell_dict[cluster] = []
+-        cluster_cell_dict[cluster].append(i)
++    cluster_cell_dict = {
++        cluster: np.flatnonzero(clusters == cluster)
++        for cluster in unique_clusters
++    }
+ 
+     # R: clustExp = ppois(cnts-1,exp,lower.tail=FALSE)
+     # Convert sparse to dense for easier manipulation
+@@ -517,11 +516,10 @@ def estimateNonExpressingCells(
+     # Expand back to cell level - if cluster passes for a gene, all cells in cluster pass
+     use_cells = np.ones((sc.n_cells, len(set_gene_rows)), dtype=bool)
+ 
+-    for i, cluster in enumerate(clusters):
+-        cluster_idx = np.where(unique_clusters == cluster)[0]
+-        if len(cluster_idx) > 0:
+-            cluster_idx = cluster_idx[0]
+-            use_cells[i, :] = cluster_passes[:, cluster_idx]
++    for cluster_idx, cluster in enumerate(unique_clusters):
++        cell_indices = cluster_cell_dict[cluster]
++        if len(cell_indices) > 0:
++            use_cells[cell_indices, :] = cluster_passes[:, cluster_idx]
+ 
+     if len(set_gene_rows) == 1:
+         return use_cells[:, 0]

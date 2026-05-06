@@ -1,0 +1,84 @@
+{
+  "fixtures": [
+    "very_small",
+    "small",
+    "medium"
+  ],
+  "patches": {
+    "patch2": {
+      "target": "autoEstCont posterior evaluation",
+      "very_small": {
+        "autoEstCont_speedup_vs_baseline": 7.145662587828822
+      },
+      "small": {
+        "autoEstCont_speedup_vs_baseline": 19.29454329426491
+      },
+      "medium": {
+        "autoEstCont_speedup_vs_baseline": 10.724066780978964
+      }
+    },
+    "patch3": {
+      "target": "batched estimateNonExpressingCells in autoEstCont",
+      "very_small": {
+        "estimateNonExpressingCells_speedup_vs_patch2": 0.8228694650823507,
+        "autoEstCont_speedup_vs_patch2": 0.8529353372833255
+      },
+      "small": {
+        "estimateNonExpressingCells_speedup_vs_patch2": 0.9519900688400017,
+        "autoEstCont_speedup_vs_patch2": 1.0110293422304188
+      },
+      "medium": {
+        "estimateNonExpressingCells_speedup_vs_patch2": 0.8297864025581981,
+        "autoEstCont_speedup_vs_patch2": 1.0141733113598463
+      }
+    },
+    "patch4": {
+      "target": "cluster mapping reuse in estimation paths",
+      "very_small": {
+        "estimateNonExpressingCells_speedup_vs_patch3": 1.2861890474046107,
+        "autoEstCont_speedup_vs_patch3": 1.1908129196464927
+      },
+      "small": {
+        "estimateNonExpressingCells_speedup_vs_patch3": 1.029561203977941,
+        "autoEstCont_speedup_vs_patch3": 1.0325446436875403
+      },
+      "medium": {
+        "estimateNonExpressingCells_speedup_vs_patch3": 1.2004323965406136,
+        "autoEstCont_speedup_vs_patch3": 1.071989932962041
+      }
+    },
+    "patch5": {
+      "target": "quickMarkers vectorization",
+      "very_small": {
+        "quickMarkers_speedup_vs_patch4": 12.45001215657405,
+        "autoEstCont_speedup_vs_patch4": 7.69616852813572
+      },
+      "small": {
+        "quickMarkers_speedup_vs_patch4": 8.508404474999162,
+        "autoEstCont_speedup_vs_patch4": 2.2933848277942297
+      },
+      "medium": {
+        "quickMarkers_speedup_vs_patch4": 6.365327117448028,
+        "autoEstCont_speedup_vs_patch4": 2.213690905750332
+      }
+    },
+    "patch6": {
+      "target": "chunked correction matrix extraction",
+      "very_small": {
+        "subtraction": 1.1807424426009494,
+        "multinomial": 1.071940710505289,
+        "soupOnly": 0.9821685030732252
+      },
+      "small": {
+        "subtraction": 0.9742594896500638,
+        "multinomial": 1.079486233025659,
+        "soupOnly": 1.0493471782362207
+      },
+      "medium": {
+        "subtraction": 1.036478266771205,
+        "multinomial": 0.9965863202821689,
+        "soupOnly": 1.0327730237882287
+      }
+    }
+  }
+}
