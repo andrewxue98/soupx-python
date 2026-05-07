@@ -76,24 +76,28 @@ def adjustCounts(
             cluster_groups[cluster].append(i)
 
         # Create cluster-level aggregated data
-        cluster_toc = []
         cluster_metadata = []
+        cluster_ids = list(cluster_groups.keys())
+        cluster_positions = {cluster_id: idx for idx, cluster_id in enumerate(cluster_ids)}
+        cluster_codes = np.array([cluster_positions[cluster] for cluster in clusters], dtype=int)
+        assign = sparse.csr_matrix(
+            (
+                np.ones(sc.n_cells, dtype=float),
+                (np.arange(sc.n_cells), cluster_codes),
+            ),
+            shape=(sc.n_cells, len(cluster_ids)),
+        )
+        cluster_toc_matrix = (sc.toc @ assign).tocsr()
 
         # Preserve the same cluster column order used later during expansion.
-        for cluster_id in cluster_groups:
+        for cluster_id in cluster_ids:
             cell_indices = cluster_groups[cluster_id]
-            # Aggregate counts for cluster
-            cluster_counts = np.array(sc.toc[:, cell_indices].sum(axis=1)).flatten()
-            cluster_toc.append(cluster_counts)
 
             # Aggregate metadata
             cluster_nUMIs = sc.metaData.iloc[cell_indices]['nUMIs'].sum()
             cluster_rho = (sc.metaData.iloc[cell_indices]['rho'] *
                           sc.metaData.iloc[cell_indices]['nUMIs']).sum() / cluster_nUMIs
             cluster_metadata.append({'nUMIs': cluster_nUMIs, 'rho': cluster_rho})
-
-        # Create temporary cluster-level SoupChannel
-        cluster_toc_matrix = sparse.csr_matrix(np.column_stack(cluster_toc))
 
         tmp_sc = type(sc).__new__(type(sc))
         tmp_sc.toc = cluster_toc_matrix
@@ -156,8 +160,9 @@ def expandClusters(
     if verbose > 0:
         print(f"Expanding counts from {cluster_soup.shape[1]} clusters to {n_cells} cells (vectorized)")
 
-    # Pre-allocate result - use same dtype as input
-    cell_soup = sparse.lil_matrix((n_genes, n_cells), dtype=cluster_soup.dtype)
+    row_idx = []
+    col_idx = []
+    data = []
 
     # Process each cluster exactly like R version
     cluster_ids = list(cluster_groups.keys())
@@ -176,10 +181,15 @@ def expandClusters(
 
         if len(cell_indices) == 1:
             # Single cell - direct assignment (matches R exactly)
-            cell_soup[:, cell_indices[0]] = cluster_soup_vec.reshape(-1, 1)
+            nz_genes = np.flatnonzero(cluster_soup_vec != 0)
+            if len(nz_genes) > 0:
+                row_idx.extend(nz_genes.tolist())
+                col_idx.extend([cell_indices[0]] * len(nz_genes))
+                data.extend(cluster_soup_vec[nz_genes].tolist())
         else:
             # Multiple cells - CRITICAL FIX: use R's exact weight calculation
             cell_indices_array = np.array(cell_indices)
+            cluster_obs = toc[:, cell_indices_array].toarray()
 
             # R uses: ws[wCells]/sum(ws[wCells]) where ws = cellWeights
             # cellWeights in R = sc$metaData$nUMIs*sc$metaData$rho (target soup counts)
@@ -198,25 +208,25 @@ def expandClusters(
             # where tmp = lapply(w,function(e) alloc(nSoup[...], expCnts@x[e], ww[...]))
 
             # For each gene, call alloc function exactly like R
-            for gene_idx in range(n_genes):
+            nz_genes = np.flatnonzero(cluster_soup_vec > 0)
+            for gene_idx in nz_genes:
                 nSoup = cluster_soup_vec[gene_idx]  # Target soup for this gene
 
-                if nSoup <= 0:
-                    # No soup to distribute
-                    for cell_idx in cell_indices:
-                        cell_soup[gene_idx, cell_idx] = 0
-                else:
-                    # Get bucket limits (observed counts for this gene in these cells)
-                    bucketLims = toc[gene_idx, cell_indices_array].toarray().flatten()
+                # Get bucket limits (observed counts for this gene in these cells)
+                bucketLims = cluster_obs[gene_idx, :]
 
-                    # Call R's alloc function
-                    allocated = alloc(nSoup, bucketLims, ww)
+                # Call R's alloc function
+                allocated = alloc(nSoup, bucketLims, ww)
 
-                    # Assign to cells
-                    for i, cell_idx in enumerate(cell_indices):
-                        cell_soup[gene_idx, cell_idx] = allocated[i]
+                # Assign to cells
+                for i, cell_idx in enumerate(cell_indices):
+                    value = allocated[i]
+                    if value != 0:
+                        row_idx.append(gene_idx)
+                        col_idx.append(cell_idx)
+                        data.append(value)
 
-    return cell_soup.tocsr()
+    return sparse.csr_matrix((data, (row_idx, col_idx)), shape=(n_genes, n_cells))
 
 
 def alloc(tgt: float, bucketLims: np.ndarray, ws: np.ndarray) -> np.ndarray:
@@ -294,32 +304,28 @@ def _subtraction_method(
     if verbose >= 1:
         print("Using subtraction method")
 
-    # Calculate expected soup counts
-    soup_expression = sc.soupProfile['est'].values
-    corrected = sc.toc.copy().astype(float)
+    # Subtraction can only reduce existing nonzero counts, so operate directly
+    # on sparse entries rather than densifying gene x cell blocks.
+    toc = sc.toc.tocoo(copy=False)
+    soup_expression = sc.soupProfile['est'].to_numpy(dtype=float)
+    target_soup = (
+        sc.metaData['nUMIs'].to_numpy(dtype=float) *
+        sc.metaData['rho'].to_numpy(dtype=float)
+    )
 
-    for cell_idx in range(sc.n_cells):
-        cell_rho = sc.metaData.iloc[cell_idx]['rho']
-        cell_nUMIs = sc.metaData.iloc[cell_idx]['nUMIs']
+    corrected_data = toc.data.astype(float, copy=True)
+    corrected_data -= soup_expression[toc.row] * target_soup[toc.col]
+    keep = corrected_data > 0
 
-        # Expected soup counts for this cell
-        expected_soup = soup_expression * cell_nUMIs * cell_rho
-
-        # Get observed counts
-        observed = sc.toc[:, cell_idx].toarray().flatten()
-
-        # Simple subtraction
-        corrected_counts = observed - expected_soup
-
-        # Can't have negative counts
-        corrected_counts = np.maximum(corrected_counts, 0)
-
-        corrected[:, cell_idx] = corrected_counts.reshape(-1, 1)
+    corrected = sparse.csr_matrix(
+        (corrected_data[keep], (toc.row[keep], toc.col[keep])),
+        shape=sc.toc.shape,
+    )
 
     if roundToInt:
         corrected = _stochastic_round(corrected)
 
-    return corrected.tocsr()
+    return corrected
 
 
 def _multinomial_method(
